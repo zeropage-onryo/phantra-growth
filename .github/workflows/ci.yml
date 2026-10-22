@@ -1,0 +1,27 @@
+name: CI
+
+"on":
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # ffprobe for the clip checks; discord.py comes from requirements, so the
+      # wiring test (which caught a startup crash on 2026-10-22) never skips here.
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - run: pip install -r bots/requirements.txt pytest ruff
+      - run: ruff check bots
+      - run: python -m pytest -q -rs

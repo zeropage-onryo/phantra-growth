@@ -4,6 +4,13 @@
 the Discord bot is a public, installable app; the Reddit listener is read-only; no bot ever
 DMs or comments unasked). **Branch:** `claude/overnight-bots`. **Code:** `bots/`.
 
+**Moved 2026-10-22** (Mike: "these bots need to be separate from main"): out of
+`zeropage-onryo/phantra-ai` into this repo, `zeropage-onryo/phantra-growth`, with their
+history. Paths below are unchanged (`bots/...`); "the repo's tests" and `.env.example` now mean
+this repo's. Running the suite here with `discord.py` installed (it never was in the studio's
+venv) found that the bot crashed on start: `from __future__ import annotations` in `bot.py`
+hid `discord` from the annotations discord.py evaluates. Fixed in the move.
+
 ## As built (2026-10-22)
 
 Everything lives under `bots/`, a package that imports nothing from `src/` or `app/`: a bot

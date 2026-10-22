@@ -48,5 +48,5 @@ hold that in a test).
     venv/bin/python -m pytest bots/reddit_listener -q
 
 Fixtures in `tests/fixtures/` are hand-written in the shape PRAW's
-`new()` yields (not recorded from Reddit). `praw` is not installed in the
-project's venv and is imported only inside `facade.build_client`.
+`new()` yields (not recorded from Reddit). `praw` is imported only inside
+`facade.build_client`, so the tests run with or without it.

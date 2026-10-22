@@ -1,0 +1,6 @@
+# Same baseline as the studio repo: pyflakes + pycodestyle errors + import sorting.
+target-version = "py39"
+line-length = 120
+
+[lint]
+select = ["E", "F", "I"]

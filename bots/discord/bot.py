@@ -2,9 +2,14 @@
 `discord` so the rest of the package, and its tests, load without the
 library. No guild id anywhere: the commands are global, the app is
 installed by anyone through the install link in README.md.
-"""
-from __future__ import annotations
 
+No `from __future__ import annotations` here: discord.py reads the command
+callbacks' annotations to build the slash-command options, and it resolves
+string annotations against this module's globals, where `discord` is not
+defined (it is imported inside build()). With the future import the bot
+raised NameError on start; test_bot.py catches it once discord.py is
+installed (2026-10-22, found when the bots moved to phantra-growth).
+"""
 import io
 import sys
 

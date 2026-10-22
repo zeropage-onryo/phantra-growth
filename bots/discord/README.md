@@ -94,10 +94,12 @@ service-key door on the API (`PHANTRA_BOT_API_AUTH=bearer` sends the key as
 
 They run against an API faked over `httpx.MockTransport` and duck-typed
 Discord objects (`tests/conftest.py`); `bots/conftest.py` blocks every
-socket, so a test can never reach Discord, Reddit or Phantra. `discord.py`
-is not installed in the project's venv: the flow (`flow.py`) is tested
-without it, and the one test of the wiring (`test_bot.py`) skips with the
-reason.
+socket, so a test can never reach Discord, Reddit or Phantra. The flow
+(`flow.py`) is tested without `discord.py`; the one test of the wiring
+(`test_bot.py`) needs it installed (it is in `bots/requirements.txt`) and
+skips with the reason otherwise. CI installs it, so it always runs there:
+while this lived in the studio repo it always skipped, and it was hiding a
+startup crash (fixed 2026-10-22, see the note at the top of `bot.py`).
 
 ## Not built yet
 
