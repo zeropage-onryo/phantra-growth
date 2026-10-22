@@ -1,0 +1,9 @@
+# The bots' own dependencies (2026-10-22, docs/tasks/task-bots.md). They
+# run on their own host and are NOT part of requirements.txt: install them
+# into a venv of their own (`python -m venv bots/venv && bots/venv/bin/pip
+# install -r bots/requirements.txt`). The repo's tests run the bots' logic
+# without the two client libraries; tests that need one skip when it is
+# absent.
+discord.py==2.5.2
+praw==7.8.1
+httpx==0.28.1
