@@ -52,9 +52,27 @@ both skip with a reason otherwise. CI installs both, so neither skips there.
 - **Secrets by name only.** Values live on the bot's host, never in the repo
   (a test checks for token-shaped strings).
 
-## Open before either bot goes live
+## Going live on Fly (the Discord bot)
 
-See "MIKE (later)" in `docs/tasks/task-bots.md`: the Discord application, the
-bot's API identity (a session cookie today, a service key is the right
-answer), the Reddit app and Data API approval, where alerts go, and which
-host runs them.
+Needs the studio's PR #503 (the bot's door) merged and deployed, and
+`PHANTRA_FREE_LOOKS=1` on `phantra-api`.
+
+1. **Discord app** (discord.com/developers/applications): New Application
+   "Phantra Looks" -> Bot -> Reset Token (keep it in your password manager).
+   Installation: Guild Install on, User Install off, scopes `bot` +
+   `applications.commands`, the permissions in `bots/discord/README.md`.
+   Bot -> Privileged Gateway Intents: **Server Members Intent** on (the
+   welcome DM). Install it on your server with the portal's install link.
+2. **Phantra sign-in**: `python -m bots.discord pair`, approve the code at
+   phantra.ai/studio/link in the workspace the bot should use, copy the token.
+3. **Fly** (from this folder):
+
+       fly launch --copy-config --no-deploy        # keep fly.toml; rename `app` if taken
+       fly volumes create growth_state --size 1 --region iad
+       fly secrets set DISCORD_BOT_TOKEN=... PHANTRA_BOT_API_KEY=...
+       fly deploy
+       fly logs                                    # "phantra bot ready as ..."
+
+About $4/month (one shared-cpu-1x 512 MB machine and a 1 GB volume). The
+Reddit listener joins the same app once Reddit approves API access: see the
+comment in `fly.toml`.

@@ -1,40 +1,40 @@
-"""The bot's client of the Phantra API (2026-10-22). HTTP only: it never
-imports a provider SDK and never imports `src/` or `app/`.
+"""The bot's client of the Phantra API (2026-10-22; door changed 2026-10-26).
+HTTP only: it never imports a provider SDK and never imports the studio's
+`src/` or `app/`.
 
-The five calls a look needs, in the order the bot makes them:
+WHO THE BOT IS to the API. A plugin token of the `discord-bot` kind, on the
+same door the editor panels use (`/plugin/v1`, app/plugin_api.py in the
+studio repo). `pair()` gets one: it shows a code, a member of the
+workspace the bot should file into approves it at phantra.ai/studio/link,
+and the token comes back. Set it as `PHANTRA_BOT_API_KEY`. It is revocable
+in the studio (Settings -> Connections) and dies after 90 idle days, which
+a running bot never reaches. A bot token reaches ONLY the routes below:
+every panel tool is 403 `not_for_bots`, so it can never quote or spend.
 
-  effects()                 GET  /api/effects          the table (free to read)
-  upload_clip(data, name)   POST /api/cut/media        -> asset:<id>
-  quote(effect, handle)     POST /api/effects/quote    -> credits (spends nothing)
-  run(effect, handle, 0)    POST /api/effects/run      -> job_id, with expect_credits
-  job(id) / wait(id)        GET  /api/jobs/<id>        -> output URL when done
+The calls a look needs, in the order the bot makes them:
 
-`run` is only ever called with `expect_credits=0`: the API refuses (409
-price_changed) a run whose price is not the one named, so a look that has
-stopped being free cannot be paid for by the bot by accident. `quote`
-is asked first anyway and `NotFree` raised on anything above 0, so the
-person is told in words before the API is asked to run.
+  effects()               GET  /plugin/v1/looks       the free looks switched on
+  upload_clip(data, name) POST /plugin/v1/upload      raw bytes -> asset:<id>
+  run(look, handle)       POST /plugin/v1/looks/run   -> job_id (402 not_free if priced)
+  job(id) / wait(id)      GET  /plugin/v1/jobs/<id>   -> the output when done
 
-WHO THE BOT IS to the API. Every `/api` route is gated by the
-`phantra_session` cookie (app/auth.py `current_account_id`); the operator
-key `PHANTRA_MCP_TOKEN` opens `/mcp`, not `/api`. So the service
-credential `PHANTRA_BOT_API_KEY` is, today, a session cookie value minted
-for the bot's own workspace (auth mode `cookie`, the default), and every
-clip and look the bot runs is filed in THAT workspace. Mode `bearer` sends
-it as `Authorization: Bearer` instead, for the day the API grows a
-service-key door; nothing on the API side reads that header yet.
+The API refuses any look that is not free with 0 credits (402 `not_free`),
+which arrives here as `NotFree`: the bot cannot pay for anything, by
+design on the server, not by promise here.
 """
 from __future__ import annotations
 
 import time
 from typing import Any, Callable, Optional
+from urllib.parse import urlsplit
 
 import httpx
 
-SESSION_COOKIE = "phantra_session"
 FREE_LOOK_IDS = ("film_grade", "noir", "flash_2000s", "crash_zoom", "vertical_ready")
 BUNDLE_ID = "make_it_pro"
 ALLOWLIST = FREE_LOOK_IDS + (BUNDLE_ID,)
+CLIENT_KIND = "discord-bot"
+USER_AGENT = "phantra-discord-bot/0.2"
 
 
 class APIError(RuntimeError):
@@ -46,11 +46,12 @@ class APIError(RuntimeError):
 
 
 class NotFree(RuntimeError):
-    """The look was quoted above 0 credits: the bot runs nothing priced."""
+    """The API refused the look because it is not free: the bot runs free
+    looks only."""
 
-    def __init__(self, effect: str, credits: int):
-        super().__init__(f"{effect} costs {credits} credits; the bot runs free looks only")
-        self.effect, self.credits = effect, credits
+    def __init__(self, effect: str, message: str = ""):
+        super().__init__(message or f"{effect} is not a free look")
+        self.effect = effect
 
 
 class JobFailed(RuntimeError):
@@ -76,60 +77,56 @@ def _error_of(resp: httpx.Response) -> APIError:
 
 class PhantraAPI:
     """One client per bot process. `client` is injectable (tests hand it an
-    httpx.Client over a MockTransport); `sleep` too, so `wait` is tested
-    without waiting."""
+    httpx.Client over a MockTransport), and so are `media` (the plain client
+    that fetches a finished clip from the bucket, which must never see the
+    token) and `sleep`, so `wait` is tested without waiting."""
 
-    def __init__(self, base: str, key: str, *, auth: str = "cookie",
-                 client: Optional[httpx.Client] = None, timeout: float = 60.0,
+    def __init__(self, base: str, token: str, *,
+                 client: Optional[httpx.Client] = None,
+                 media: Optional[httpx.Client] = None,
+                 timeout: float = 120.0,
                  sleep: Callable[[float], None] = time.sleep):
         self.base = base.rstrip("/")
-        self.auth = auth
+        self._origin = _origin(self.base)
         self._sleep = sleep
-        headers, cookies = {"User-Agent": "phantra-discord-bot/0.1"}, {}
-        if auth == "bearer":
-            headers["Authorization"] = f"Bearer {key}"
-        else:
-            cookies[SESSION_COOKIE] = key
-        self._client = client or httpx.Client(base_url=self.base, headers=headers,
-                                              cookies=cookies, timeout=timeout,
+        headers = {"User-Agent": USER_AGENT, "Authorization": f"Bearer {token}"}
+        self._client = client or httpx.Client(base_url=self.base, timeout=timeout,
                                               follow_redirects=False)
-        if client is not None:
-            # a handed-in client still speaks as the bot
-            client.headers.update(headers)
-            for k, v in cookies.items():
-                client.cookies.set(k, v)
+        self._client.headers.update(headers)
+        # no Authorization here, ever: the output lives on the media host
+        self._media = media or httpx.Client(timeout=timeout, follow_redirects=True,
+                                            headers={"User-Agent": USER_AGENT})
 
-    # -- the calls -----------------------------------------------------
     def _json(self, resp: httpx.Response) -> Any:
         if resp.status_code >= 400:
             raise _error_of(resp)
         return resp.json()
 
+    # -- the calls -----------------------------------------------------
     def effects(self) -> list[dict]:
-        """The effects table as the gallery reads it. Free to call."""
-        body = self._json(self._client.get("/api/effects"))
-        return list(body.get("items") or []) if isinstance(body, dict) else []
+        """The free looks the API offers: [{id, label, credits: 0}]."""
+        body = self._json(self._client.get("/plugin/v1/looks"))
+        return list(body.get("looks") or []) if isinstance(body, dict) else []
 
-    def upload_clip(self, data: bytes, filename: str) -> dict:
-        """-> {handle: 'asset:<id>', seconds, kind, ...}."""
-        resp = self._client.post("/api/cut/media",
-                                 files={"file": (filename, data, "video/mp4")})
+    def upload_clip(self, data: bytes, filename: str = "") -> dict:
+        """The clip's raw bytes -> {handle: 'asset:<id>', seconds, kind}.
+        The API types a file by its bytes, never its name."""
+        resp = self._client.post("/plugin/v1/upload", content=data,
+                                 headers={"Content-Type": "application/octet-stream"})
+        body = self._json(resp)
+        return {**body, "handle": body.get("asset") or body.get("handle")}
+
+    def run(self, look: str, handle: str) -> dict:
+        """-> {job_id}. A look that is not free is the API's 402 -> NotFree."""
+        resp = self._client.post("/plugin/v1/looks/run",
+                                 json={"look": look, "source": handle})
+        if resp.status_code == 402:
+            raise NotFree(look, _error_of(resp).message)
         return self._json(resp)
 
-    def quote(self, effect: str, handle: str, options: Optional[dict] = None) -> dict:
-        body = {"effect": effect, "sources": [handle], "options": options or {}}
-        return self._json(self._client.post("/api/effects/quote", json=body))
-
-    def run(self, effect: str, handle: str, expect_credits: int = 0,
-            options: Optional[dict] = None) -> dict:
-        if expect_credits != 0:
-            raise NotFree(effect, expect_credits)
-        body = {"effect": effect, "sources": [handle], "options": options or {},
-                "expect_credits": 0}
-        return self._json(self._client.post("/api/effects/run", json=body))
-
     def job(self, job_id: int) -> dict:
-        return self._json(self._client.get(f"/api/jobs/{int(job_id)}"))
+        body = self._json(self._client.get(f"/plugin/v1/jobs/{int(job_id)}"))
+        return body.get("job") if isinstance(body, dict) and "job" in body else body
 
     def wait(self, job_id: int, *, timeout: float = 600.0, interval: float = 2.0) -> dict:
         """Poll until the job ends. Done -> the job; failed or cancelled ->
@@ -148,8 +145,16 @@ class PhantraAPI:
             self._sleep(interval)
 
     def fetch(self, url: str, *, max_bytes: int = 100 * 1024 * 1024) -> bytes:
-        """The finished clip's bytes, for posting as a file. Capped."""
-        with self._client.stream("GET", url, follow_redirects=True) as resp:
+        """The finished clip's bytes, for posting as a file. Capped. A path
+        on the API (no bucket) is read with the bot's own client; anything
+        else is read WITHOUT the token, so it never reaches the media host."""
+        if url.startswith("/"):
+            stream = self._client.stream("GET", url)
+        elif _origin(url) == self._origin:
+            stream = self._client.stream("GET", url)
+        else:
+            stream = self._media.stream("GET", url)
+        with stream as resp:
             if resp.status_code >= 400:
                 raise APIError(resp.status_code, "fetch_failed", "the output could not be read")
             out = bytearray()
@@ -160,22 +165,52 @@ class PhantraAPI:
         return bytes(out)
 
     # -- the look, end to end --------------------------------------------
-    def run_free_look(self, effect: str, data: bytes, filename: str, *,
-                      options: Optional[dict] = None, timeout: float = 600.0) -> dict:
-        """Upload, quote, refuse anything priced, run at 0, wait. Returns
-        {handle, job, output} where `output` is the finished clip's URL."""
+    def run_free_look(self, look: str, data: bytes, filename: str, *,
+                      timeout: float = 600.0) -> dict:
+        """Upload, run (free only, the API's rule), wait. Returns
+        {handle, job, output, seconds} where `output` is the finished clip."""
         up = self.upload_clip(data, filename)
         handle = str(up.get("handle") or "")
         if not handle.startswith("asset:"):
             raise APIError(500, "no_handle", "the upload came back without a handle")
-        q = self.quote(effect, handle, options)
-        credits = int(q.get("credits") or 0)
-        if credits > 0:
-            raise NotFree(effect, credits)
-        started = self.run(effect, handle, 0, options)
+        started = self.run(look, handle)
         job = self.wait(int(started["job_id"]), timeout=timeout)
         output = job.get("output") or (job.get("result") or {}).get("output")
         if not output:
             raise JobFailed("the look finished without an output")
         return {"handle": handle, "job": job, "output": str(output),
                 "seconds": up.get("seconds")}
+
+
+def _origin(url: str) -> tuple[str, str]:
+    parts = urlsplit(url)
+    return (parts.scheme.lower(), parts.netloc.lower())
+
+
+# -- getting a token ---------------------------------------------------------
+
+def pair(base: str, *, device: str = "Phantra Discord bot",
+         client: Optional[httpx.Client] = None,
+         sleep: Callable[[float], None] = time.sleep,
+         say: Callable[[str], None] = print) -> str:
+    """Sign the bot in, once, from a terminal: show the code, wait while a
+    person approves it at the studio's link page, return the token. Raises
+    APIError if the code expires or the API says no."""
+    http = client or httpx.Client(base_url=base.rstrip("/"), timeout=30.0,
+                                  headers={"User-Agent": USER_AGENT})
+    started = http.post("/plugin/v1/pair", json={"client": CLIENT_KIND, "device": device})
+    if started.status_code >= 400:
+        raise _error_of(started)
+    s = started.json()
+    say(f"Open {s['link_url']} signed in to the workspace the bot should use,")
+    say(f"and enter this code: {s['code']}   (it expires in {s['expires_in'] // 60} minutes)")
+    deadline = time.monotonic() + float(s["expires_in"])
+    while time.monotonic() < deadline:
+        sleep(float(s.get("interval") or 5))
+        polled = http.post("/plugin/v1/pair/token", json={"secret": s["secret"]})
+        if polled.status_code == 200:
+            return str(polled.json()["token"])
+        err = _error_of(polled)
+        if err.code != "authorization_pending":
+            raise err
+    raise APIError(400, "expired_token", "The code expired. Run pair again.")

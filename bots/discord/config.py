@@ -12,7 +12,6 @@ from dataclasses import dataclass
 TOKEN_ENV = "DISCORD_BOT_TOKEN"
 API_BASE_ENV = "PHANTRA_API_BASE"
 API_KEY_ENV = "PHANTRA_BOT_API_KEY"
-API_AUTH_ENV = "PHANTRA_BOT_API_AUTH"          # cookie (default) | bearer
 STATE_DIR_ENV = "PHANTRA_BOT_STATE_DIR"
 DAILY_CAP_ENV = "PHANTRA_BOT_DAILY_CAP"
 WELCOME_DM_ENV = "PHANTRA_BOT_WELCOME_DM"      # "1" (default) | "0"
@@ -31,8 +30,7 @@ MAX_BYTES = 100 * 1024 * 1024
 class Settings:
     token: str
     api_base: str
-    api_key: str
-    api_auth: str
+    api_key: str           # the plugin token `python -m bots.discord pair` prints
     state_dir: str
     daily_cap: int
     welcome_dm: bool
@@ -46,7 +44,6 @@ class Settings:
             token=env.get(TOKEN_ENV, "").strip(),
             api_base=(env.get(API_BASE_ENV, "").strip() or DEFAULT_API_BASE).rstrip("/"),
             api_key=env.get(API_KEY_ENV, "").strip(),
-            api_auth=(env.get(API_AUTH_ENV, "").strip().lower() or "cookie"),
             state_dir=env.get(STATE_DIR_ENV, "").strip() or "bots/state",
             daily_cap=int(cap) if cap.isdigit() else DEFAULT_DAILY_CAP,
             welcome_dm=(env.get(WELCOME_DM_ENV, "1").strip() or "1") != "0",

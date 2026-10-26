@@ -60,20 +60,20 @@ def test_makeitpro_is_the_bundle_through_the_same_door(studio):
     ix = FakeInteraction()
     out = run(run_look_command(ix, FakeAttachment(), "make_it_pro", svc))
     assert out["ok"] and out["look"] == "make_it_pro"
-    run_call = next(c for c in studio.calls if c["path"] == "/api/effects/run")
-    assert run_call["json"]["effect"] == "make_it_pro"
-    assert run_call["json"]["expect_credits"] == 0
+    run_call = next(c for c in studio.calls if c["path"] == "/plugin/v1/looks/run")
+    assert run_call["json"]["look"] == "make_it_pro"
 
 
 def test_a_look_the_api_prices_is_refused_in_words_and_never_run(studio):
-    studio.price = 24
     svc = services_for(studio)
-    svc.offered()                       # the table was read while it was free...
+    svc.offered()                       # the list was read while it was free...
+    studio.free = False                 # ...and the API now refuses it (402 not_free)
     ix = FakeInteraction()
     out = run(run_look_command(ix, FakeAttachment(), "noir", svc))
-    assert out == {"ok": False, "reason": "not_free", "credits": 24}
+    assert out == {"ok": False, "reason": "not_free"}
     assert studio.runs == 0
-    assert "not free right now (24 credits)" in ix.private_messages()[0]
+    assert "not free right now" in ix.private_messages()[0]
+    assert "Nothing was charged" in ix.private_messages()[0]
     assert all(m.thread is None for m in ix.followup.messages)   # no anchor, no thread
 
 
@@ -166,12 +166,12 @@ def test_the_offer_is_re_read_after_its_ttl(studio):
     now = [0.0]
     svc = services_for(studio, clock=lambda: now[0])
     svc.offered()
-    reads = sum(1 for c in studio.calls if c["path"] == "/api/effects")
+    reads = sum(1 for c in studio.calls if c["path"] == "/plugin/v1/looks")
     svc.offered()
-    assert sum(1 for c in studio.calls if c["path"] == "/api/effects") == reads
+    assert sum(1 for c in studio.calls if c["path"] == "/plugin/v1/looks") == reads
     now[0] = flow.LOOKS_TTL + 1
     svc.offered()
-    assert sum(1 for c in studio.calls if c["path"] == "/api/effects") == reads + 1
+    assert sum(1 for c in studio.calls if c["path"] == "/plugin/v1/looks") == reads + 1
 
 
 def test_the_welcome_is_sent_once_and_only_once(studio, tmp_path):

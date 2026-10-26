@@ -1,0 +1,41 @@
+# phantra-growth on Fly (2026-10-26). A worker, not a web app: no
+# [http_service], nothing listens, nothing is reachable from outside.
+# Separate from phantra-api on purpose (its own secrets, its own deploys).
+#
+# First time:   fly launch --copy-config --no-deploy   (keep this file; pick
+#               the app name if phantra-growth is taken, then edit `app`)
+#               fly volumes create growth_state --size 1 --region iad
+#               fly secrets set DISCORD_BOT_TOKEN=... PHANTRA_BOT_API_KEY=...
+#               fly deploy
+# Logs:         fly logs
+app = 'phantra-growth'
+primary_region = 'iad'      # next to phantra-api
+
+[build]
+
+[env]
+  PHANTRA_API_BASE = 'https://api.phantra.ai'
+  PHANTRA_OPEN_URL = 'https://phantra.ai/studio'
+  PHANTRA_BOT_STATE_DIR = '/data'
+  PHANTRA_BOT_DAILY_CAP = '5'
+  PHANTRA_BOT_WELCOME_DM = '1'
+
+[processes]
+  discord = 'python -m bots.discord'
+  # The Reddit listener joins once Reddit approves API access: uncomment,
+  # set REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET / REDDIT_USER_AGENT /
+  # REDDIT_ALERT_WEBHOOK_URL as secrets, create a second volume
+  # (`fly volumes create growth_state --size 1 --region iad`, one per
+  # machine) and deploy.
+  # reddit = 'python -m bots.reddit_listener'
+
+# daily caps, welcomed members (and later, posts the listener has seen):
+# SQLite on a 1 GB volume, so a restart forgets nothing
+[[mounts]]
+  source = 'growth_state'
+  destination = '/data'
+
+[[vm]]
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 512           # discord.py + ffprobe on a 100 MB clip

@@ -68,15 +68,15 @@ class Services:
     @classmethod
     def from_settings(cls, settings: Settings) -> "Services":
         from pathlib import Path
-        api = PhantraAPI(settings.api_base, settings.api_key, auth=settings.api_auth)
+        api = PhantraAPI(settings.api_base, settings.api_key)
         store = LocalStore(Path(settings.state_dir) / "discord.sqlite")
         return cls(settings, api, store)
 
     def offered(self, *, refresh: bool = False) -> list[dict]:
         """The looks the bot offers right now: the free, allowlisted rows
-        of /api/effects, re-read every LOOKS_TTL seconds; the allowlist
-        itself when the API cannot be read (the quote still gates the
-        run, so a look that has stopped being free is refused there)."""
+        of /plugin/v1/looks, re-read every LOOKS_TTL seconds; the allowlist
+        itself when the API cannot be read (the API still refuses a
+        look that has stopped being free)."""
         now = self.clock()
         stale = self._looks_read_at is None or now - self._looks_read_at >= LOOKS_TTL
         if refresh or stale:
@@ -156,10 +156,10 @@ async def run_look_command(interaction, attachment, look_id: str, services: Serv
 
     try:
         result = await services.to_thread(services.api.run_free_look, look["id"], data, filename)
-    except NotFree as e:
-        await _say(interaction, f"{label} is not free right now ({e.credits} credits), so I "
-                                f"did not run it. Run it yourself in the studio: {link}")
-        return {"ok": False, "reason": "not_free", "credits": e.credits}
+    except NotFree:
+        await _say(interaction, f"{label} is not free right now, so I did not run it. "
+                                f"Nothing was charged. Run it yourself in the studio: {link}")
+        return {"ok": False, "reason": "not_free"}
     except (APIError, JobFailed) as e:
         await _say(interaction, f"{label} did not run: {getattr(e, 'message', str(e))}. "
                                 f"Nothing was charged.")
@@ -182,7 +182,10 @@ async def run_look_command(interaction, attachment, look_id: str, services: Serv
     except (APIError, JobFailed):
         pass
     if not posted_file:
-        await thread.send(content=f"{content}\n{result['output']}")
+        output = result["output"]
+        if output.startswith("/"):
+            output = services.api.base + output    # a path on the API: say it whole
+        await thread.send(content=f"{content}\n{output}")
     return {"ok": True, "look": look["id"], "handle": result["handle"], "output": result["output"],
             "link": link, "posted_file": posted_file, "used_today": n}
 

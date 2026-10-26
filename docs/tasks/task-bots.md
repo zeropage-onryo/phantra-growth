@@ -102,22 +102,31 @@ the reason). `bots/common/store.py` is one SQLite file (daily counters + named s
   fails and the thread gets the link, which the flow handles but no test exercises against
   the real library.
 
+## The bot's sign-in and host (2026-10-26, settled)
+
+- **Identity:** a plugin token of the `discord-bot` kind on the studio's `/plugin/v1` door
+  (zeropage-onryo/phantra-ai PR #503), not a cookie and not a new key on `/api`.
+  `python -m bots.discord pair` gets it; it reaches only `/me`, `/upload`, `/looks`,
+  `/looks/run`, `/jobs/<id>`, and the server refuses (402 `not_free`) any look that is not
+  free. `PHANTRA_BOT_API_AUTH` and the cookie mode are gone.
+- **Host:** Fly app `phantra-growth` (fly.toml, Dockerfile here): one shared-cpu-1x 512 MB
+  worker in iad, a 1 GB volume at /data for the SQLite stores. The Reddit listener is a
+  commented second process group until Reddit approves API access.
+- **Verified 2026-10-26** against the real studio API run locally (Postgres 16, free looks
+  on): `pair()` -> approved the studio's way -> six looks listed -> `/tools/balance` 403
+  `not_for_bots` -> a 3 s clip uploaded -> Noir done in 4.2 s -> a valid 4 s H.264 clip
+  fetched (3 s plus the 1 s end card) -> `upscale` and `remove-video-background` refused
+  `not_free` -> 0 credit holds in the ledger. The image built and refused to start without
+  its two secrets, by name. Not verified: a real Discord login (no token yet).
+
 ## MIKE (later)
 
-- [ ] Create the Discord application (developer portal): Bot, public Guild Install with
-  scopes `bot` + `applications.commands`, the permissions in `bots/discord/README.md`, Server
-  Members Intent if the welcome DM stays on. Put `DISCORD_BOT_TOKEN` in the bot host's env.
-- [ ] Decide the bot's API identity: (a) make a `phantra-bot` workspace, mint a
-  `phantra_session` cookie value for a member of it (itsdangerous with `SESSION_SECRET`, as
-  `app/auth.py` does) and set it as `PHANTRA_BOT_API_KEY` (expires in 30 days), or (b) ask for
-  a small API change: a service-key door on `/api` for `Authorization: Bearer
-  <PHANTRA_BOT_API_KEY>` bound to one workspace (then `PHANTRA_BOT_API_AUTH=bearer`). (b) is the
-  right one; it is a security surface and was not built overnight.
-- [ ] Create the Reddit "script" app (reddit.com/prefs/apps); set `REDDIT_CLIENT_ID`,
-  `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT`; pick where alerts go (a Discord channel webhook
-  URL into `REDDIT_ALERT_WEBHOOK_URL`, or the SMTP names) and set them in env yourself.
-- [ ] Pick the hosts: both are long-running processes outside the API (the Fly image runs
-  one cron line and nothing else by your choice; the Mac runs no agents). A small Fly machine
-  per bot, or one machine running both, is the obvious shape.
-- [ ] Say whether the welcome DM stays on by default (`PHANTRA_BOT_WELCOME_DM`), and the
-  daily cap (`PHANTRA_BOT_DAILY_CAP`, 5).
+- [ ] Create the Discord application "Phantra Looks" (a NEW app, Mike's call 2026-10-26, so
+  the studio's posting bot stays quiet in customers' servers): Bot, Guild Install with scopes
+  `bot` + `applications.commands`, the permissions in `bots/discord/README.md`, Server Members
+  Intent on (the welcome DM stays on, cap stays 5 unless he says otherwise).
+- [ ] Merge PR #503 in the studio; make sure `PHANTRA_FREE_LOOKS=1` is set on `phantra-api`.
+- [ ] `python -m bots.discord pair`, approve at phantra.ai/studio/link, then the Fly steps in
+  the README.
+- [ ] Reddit: wait for the Data API approval (requested 2026-10-23), then the listener's
+  secrets and the second process group.
