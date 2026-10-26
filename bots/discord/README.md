@@ -63,30 +63,36 @@ The host needs `ffprobe` on its PATH. All settings, by name, are listed in
 `.env.example` under "the bots"; the bot refuses to start and names the
 missing ones.
 
-### How the bot authenticates to the API (read this)
+### How the bot signs in to Phantra (2026-10-26)
 
-Every `/api` route is gated by the `phantra_session` cookie
-(`app/auth.py`, `current_account_id`); the operator key `PHANTRA_MCP_TOKEN`
-opens `/mcp`, not `/api`, and the OAuth bearer path (`app/mcp_auth.py`) is
-the connector's. So today `PHANTRA_BOT_API_KEY` is a **session cookie value
-minted for the bot's own workspace** (`PHANTRA_BOT_API_AUTH=cookie`, the
-default), and every clip and look the bot runs is filed in that workspace's
-Library (`/api/cut/media` uploads, `/api/effects/run` jobs). A session lasts
-30 days (`auth.SESSION_MAX_AGE`), so the value has to be re-minted; a
-service-key door on the API (`PHANTRA_BOT_API_AUTH=bearer` sends the key as
-`Authorization: Bearer`) is the proper fix and is listed for Mike in
-`docs/tasks/task-bots.md`.
+The bot is a **plugin token** of the `discord-bot` kind, on the same door the
+editor panels use (`/plugin/v1`, `app/plugin_api.py` in the studio repo,
+PR #503). Get one once, from any machine:
+
+    PHANTRA_API_BASE=https://api.phantra.ai venv/bin/python -m bots.discord pair
+
+It prints a code. Open phantra.ai/studio/link **signed in to the workspace
+the bot should file its clips into**, enter the code, and the token is
+printed. Set it as `PHANTRA_BOT_API_KEY` (on Fly: `fly secrets set`).
+
+- It never expires while the bot runs (90 idle days), and it is revoked in
+  the studio under Settings -> Connections ("Discord bot").
+- A bot token reaches only `/me`, `/upload`, `/looks`, `/looks/run` and
+  `/jobs/<id>`. Every panel tool is 403 `not_for_bots`, so the bot can never
+  quote, approve or spend, by the server's rule rather than by promise here.
+- `/looks/run` refuses (402 `not_free`) any look that is not free with 0
+  credits; the bot tells the person, in the channel, and nothing is charged.
+- Every clip and look is filed in the approving workspace's Library.
 
 ## The API calls, in order
 
 | step | call | note |
 |---|---|---|
-| table | `GET /api/effects` | free; filtered to 0-credit allowlisted rows |
-| upload | `POST /api/cut/media` (multipart `file`) | -> `asset:<id>` |
-| price | `POST /api/effects/quote` | spends nothing; > 0 -> refused |
-| run | `POST /api/effects/run` with `expect_credits: 0` | -> `job_id` |
-| wait | `GET /api/jobs/<id>` until `done` | `output` is the clip's URL |
-| post | fetch the output, `thread.send(file=...)` | over 25 MB -> the link instead |
+| looks | `GET /plugin/v1/looks` | the free looks switched on; filtered to the allowlist |
+| upload | `POST /plugin/v1/upload` (the clip's raw bytes) | -> `asset:<id>` |
+| run | `POST /plugin/v1/looks/run {look, source}` | -> `job_id`; 402 `not_free` if priced |
+| wait | `GET /plugin/v1/jobs/<id>` until `done` | `output` is the clip's address |
+| post | fetch the output (without the token if it is on the media host), `thread.send(file=...)` | over the server's limit -> the link instead |
 
 ## Tests
 
